@@ -15,8 +15,8 @@ URLS_FILE = os.path.join(BASE_DIR, "urls.txt")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 # 每次 GitHub Actions 运行只消费 10,000 条
-BATCH_LIMIT = 10000
-MAX_WORKERS = 6
+BATCH_LIMIT = 100
+MAX_WORKERS = 4
 
 # 确保存放结果的文件夹存在
 os.makedirs(RESULTS_DIR, exist_ok=True)
