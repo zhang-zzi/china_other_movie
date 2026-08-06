@@ -1,5 +1,4 @@
 import os
-import sys
 import re
 import time
 import json
@@ -12,22 +11,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==================== 🛠️ 路径配置 ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-QUEUE_JSON = os.path.join(BASE_DIR, "queue.json")
+URLS_FILE = os.path.join(BASE_DIR, "urls.txt")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
-# 配置单次 Actions 运行抓取的数量
-BATCH_SIZE = 100
-MAX_WORKERS = 3
+# 每次 GitHub Actions 运行只消费 10,000 条（耗时约 30-40 分钟，极度安全，绝不超时）
+BATCH_LIMIT = 1000
+MAX_WORKERS = 4
 
 # 确保存放结果的文件夹存在
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
-# ==================== 高精度详情页提取 ====================
+# ==================== 详情页高精度提取 ====================
 def parse_movie(movie_url):
-    """
-    解析详情页，返回提取到的字典数据。若解析失败则返回 None。
-    """
     LOCAL_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -131,7 +127,7 @@ def parse_movie(movie_url):
                 raw_text = tags_p.get_text()
                 genres = [t.strip() for t in re.split(r'\s+', raw_text) if t.strip()]
 
-        # 组装磁力
+        # 组装磁力结构
         magnets = []
         if magnet_link:
             magnets.append({
@@ -157,61 +153,73 @@ def parse_movie(movie_url):
         return None
 
 
-# ==================== 主控逻辑 ====================
+# ==================== 主控任务分发 ====================
 def main():
-    print("ℹ️ GitHub Actions 批量采集主程序启动...")
+    print("ℹ️ GitHub Actions 定量消费爬虫启动...")
 
-    if not os.path.exists(QUEUE_JSON):
-        print(f"❌ 仓库中未找到 {QUEUE_JSON}，请先在本地生成并推送。")
+    if not os.path.exists(URLS_FILE):
+        print(f"❌ 未找到待采集链接文件: {URLS_FILE}")
         return
 
-    with open(QUEUE_JSON, "r", encoding="utf-8") as f:
-        queue_data = json.load(f)
+    with open(URLS_FILE, "r", encoding="utf-8") as f:
+        urls = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
 
-    # 过滤出 status 为 0 的链接，并限制单次处理的数量
-    pending_urls = [url for url, status in queue_data.items() if status == 0][:BATCH_SIZE]
-    total_pending = len(pending_urls)
-
-    if total_pending == 0:
-        print("🏁 所有数据已处理完毕，或未发现待爬取链接。")
+    total_urls = len(urls)
+    if total_urls == 0:
+        print("🏁 任务队列已空！数据全部采集完成。")
         return
 
-    print(f"📦 本次计划采集链接数量: {total_pending} 条")
+    # 切片出本次要抓取的链接，和剩余未抓取的链接
+    chunk = urls[:BATCH_LIMIT]
+    remaining = urls[BATCH_LIMIT:]
+
+    print(f"📦 队列总计剩余 {total_urls} 条。本次计划处理前 {len(chunk)} 条，留下 {len(remaining)} 条供下一次处理。")
 
     results = []
+    failed_urls = []
     results_lock = threading.Lock()
+    failed_lock = threading.Lock()
 
     def worker(url):
         data = parse_movie(url)
         if data:
             with results_lock:
                 results.append(data)
-            queue_data[url] = 1  # 状态改为成功 (1)
             print(f"  ✅ 成功: {url}")
         else:
-            queue_data[url] = 2  # 状态改为失败 (2)
+            with failed_lock:
+                failed_urls.append(url)
             print(f"  ❌ 失败: {url}")
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(worker, url): url for url in pending_urls}
+        futures = {executor.submit(worker, url): url for url in chunk}
         completed = 0
         for _ in as_completed(futures):
             completed += 1
-            if completed % 20 == 0 or completed == total_pending:
-                print(f"📊 采集进度: {completed}/{total_pending}...")
+            if completed % 100 == 0 or completed == len(chunk):
+                print(f"📊 当前批次进度: {completed}/{len(chunk)}")
 
-    # 如果抓取到了有效数据，则将其保存为独立的临时 JSON 文件
+    # 1. 落地保存抓取成功的数据
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
     if results:
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        batch_filename = os.path.join(RESULTS_DIR, f"batch_{timestamp}.json")
-        with open(batch_filename, "w", encoding="utf-8") as f:
+        batch_file = os.path.join(RESULTS_DIR, f"batch_{timestamp}.json")
+        with open(batch_file, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
-        print(f"💾 成功生成本次结果数据: {batch_filename}")
+        print(f"💾 成功保存本次抓取结果共 {len(results)} 条 -> {batch_file}")
 
-    # 将更新了状态的整个 queue.json 写回磁盘，等待 Actions 自动 commit
-    with open(QUEUE_JSON, "w", encoding="utf-8") as f:
-        json.dump(queue_data, f, ensure_ascii=False, indent=2)
-    print("💾 已更新 queue.json 中的链接状态")
+    # 2. 落地保存抓取失败的链接（失败也算处理过，不能继续留在待抓取队列里）
+    if failed_urls:
+        failed_file = os.path.join(RESULTS_DIR, f"failed_{timestamp}.txt")
+        with open(failed_file, "w", encoding="utf-8") as f:
+            for f_url in failed_urls:
+                f.write(f_url + "\n")
+        print(f"💾 成功记录本次失败链接共 {len(failed_urls)} 条 -> {failed_file}")
+
+    # 3. 用剩余未爬取的链接重写覆盖 urls.txt，实现文件自消耗变短
+    with open(URLS_FILE, "w", encoding="utf-8") as f:
+        for r_url in remaining:
+            f.write(r_url + "\n")
+    print(f"💾 urls.txt 已更新，文件已缩减，剩余待处理链接: {len(remaining)} 条")
 
 
 if __name__ == "__main__":
