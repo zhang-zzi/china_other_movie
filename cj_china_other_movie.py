@@ -16,7 +16,7 @@ QUEUE_JSON = os.path.join(BASE_DIR, "queue.json")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 # 配置单次 Actions 运行抓取的数量
-BATCH_SIZE = 3000
+BATCH_SIZE = 100
 MAX_WORKERS = 3
 
 # 确保存放结果的文件夹存在
