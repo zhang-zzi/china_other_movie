@@ -1,17 +1,36 @@
-name: Run Movie Crawler (Auto Sync)
+name: Auto Movie Crawler
 
 on:
-  workflow_dispatch: # 手动触发运行
-  # schedule:
-  #   - cron: '0 */3 * * *' # 可选：如果要彻底自动化，可以配置为每3小时自动运行一次
+  workflow_dispatch: # 支持手动点击运行
+  schedule:
+    - cron: '0 */2 * * *' # 每 2 小时自动在后台唤醒运行一次
 
 jobs:
-  run-crawler:
+  crawl:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # 获取完整历史分支，以便切换
+
+    # 自动创建并切换到独立的 data 分支，确保不污染 main 分支
+    - name: Setup Branch (Switch to data branch)
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+
+        # 检查远程是否存在 data 分支
+        if git show-ref --verify --quiet refs/remotes/origin/data; then
+          echo "🟢 data 分支已存在，切换中..."
+          git checkout data
+          git pull origin data
+        else
+          echo "🟡 data 分支不存在，正在从当前分支自动创建..."
+          git checkout -b data
+          git push -u origin data
+        fi
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -23,15 +42,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install curl_cffi beautifulsoup4
 
-    - name: Run Crawler Script
+    - name: Run Crawler
       run: python scraper.py
 
-    - name: Commit and Push queue and results back to GitHub
+    - name: Commit and Push to data branch
       run: |
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-        git config --local user.name "github-actions[bot]"
-        git add queue.json results/
-        
-        # 仅在有修改时才提交，防止空提交导致报错
+        git add urls.txt results/
+        # 只有在有文件修改时才进行提交，防止空提交报错
         git diff --quiet && git diff --staged --quiet || git commit -m "Automated crawl batch - $(date +'%Y-%m-%d %H:%M:%S')"
-        git push
+        git push origin data
