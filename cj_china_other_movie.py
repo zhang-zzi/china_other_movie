@@ -14,9 +14,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 URLS_FILE = os.path.join(BASE_DIR, "urls.txt")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
-# 每次 GitHub Actions 运行只消费 10,000 条（耗时约 30-40 分钟，极度安全，绝不超时）
-BATCH_LIMIT = 1000
-MAX_WORKERS = 4
+# 每次 GitHub Actions 运行只消费 10,000 条
+BATCH_LIMIT = 10000
+MAX_WORKERS = 6
 
 # 确保存放结果的文件夹存在
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -155,6 +155,8 @@ def parse_movie(movie_url):
 
 # ==================== 主控任务分发 ====================
 def main():
+    # ⏱️ 记录启动时间
+    start_time = time.time()
     print("ℹ️ GitHub Actions 定量消费爬虫启动...")
 
     if not os.path.exists(URLS_FILE):
@@ -207,7 +209,7 @@ def main():
             json.dump(results, f, ensure_ascii=False, indent=2)
         print(f"💾 成功保存本次抓取结果共 {len(results)} 条 -> {batch_file}")
 
-    # 2. 落地保存抓取失败的链接（失败也算处理过，不能继续留在待抓取队列里）
+    # 2. 落地保存抓取失败的链接
     if failed_urls:
         failed_file = os.path.join(RESULTS_DIR, f"failed_{timestamp}.txt")
         with open(failed_file, "w", encoding="utf-8") as f:
@@ -215,11 +217,31 @@ def main():
                 f.write(f_url + "\n")
         print(f"💾 成功记录本次失败链接共 {len(failed_urls)} 条 -> {failed_file}")
 
-    # 3. 用剩余未爬取的链接重写覆盖 urls.txt，实现文件自消耗变短
+    # 3. 用剩余未爬取的链接重写覆盖 urls.txt
     with open(URLS_FILE, "w", encoding="utf-8") as f:
         for r_url in remaining:
             f.write(r_url + "\n")
     print(f"💾 urls.txt 已更新，文件已缩减，剩余待处理链接: {len(remaining)} 条")
+
+    # ⏱️ ==================== 运行耗时统计 ====================
+    end_time = time.time()
+    elapsed_seconds = end_time - start_time
+    
+    # 格式化时间输出
+    hours = int(elapsed_seconds // 3600)
+    minutes = int((elapsed_seconds % 3600) // 60)
+    seconds = int(elapsed_seconds % 60)
+    
+    # 计算平均速度（每秒处理多少条）
+    speed = len(chunk) / elapsed_seconds if elapsed_seconds > 0 else len(chunk)
+    
+    print("\n⏱️ ==================== 采集效能与耗时统计 ====================")
+    print(f"   📊 本次实际处理链接: {len(chunk)} 条")
+    print(f"   🟢 成功解析入库: {len(results)} 条")
+    print(f"   ❌ 失败/失效链接: {len(failed_urls)} 条")
+    print(f"   ⏱️ 本次运行总耗时: {hours} 小时 {minutes} 分钟 {seconds} 秒")
+    print(f"   ⚡ 平均处理速度: {speed:.2f} 条/秒")
+    print("==============================================================\n")
 
 
 if __name__ == "__main__":
