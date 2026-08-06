@@ -22,7 +22,7 @@ MAX_WORKERS = 4
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
-# ==================== 详情页高精度提取 ====================
+# ==================== 详情页高精度提取（带诊断日志版） ====================
 def parse_movie(movie_url):
     LOCAL_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -34,7 +34,9 @@ def parse_movie(movie_url):
     thread_scraper = curl_requests.Session()
     resp = None
     max_fetch_attempts = 3
+    last_error = "None"
 
+    # 1. 网络请求
     for attempt in range(1, max_fetch_attempts + 1):
         try:
             resp = thread_scraper.get(
@@ -46,13 +48,18 @@ def parse_movie(movie_url):
             if resp.status_code == 200:
                 break
             else:
+                last_error = f"HTTP 状态码: {resp.status_code}"
                 time.sleep(0.5)
-        except Exception:
+        except Exception as req_err:
+            last_error = f"网络请求异常: {str(req_err)}"
             time.sleep(0.5)
 
+    # 诊断：如果是网络层导致失败，直接输出原因
     if not resp or resp.status_code != 200:
+        print(f"  🔍 [诊断失败] {movie_url} 加载网页失败 | 原因: {last_error}")
         return None
 
+    # 2. 网页解析
     try:
         soup = BeautifulSoup(resp.text, 'html.parser')
 
@@ -66,7 +73,9 @@ def parse_movie(movie_url):
             title_tag = soup.find('h1', class_=re.compile(r'entry-title|title'))
             title = title_tag.text.strip() if title_tag else ""
 
+        # 诊断：如果是因为拿不到标题导致失败
         if not title:
+            print(f"  🔍 [诊断失败] {movie_url} 无法解析到电影标题 (可能是空白页或改版)")
             return None
 
         # 提取发布时间
@@ -151,7 +160,9 @@ def parse_movie(movie_url):
             "source_url": movie_url
         }
 
-    except Exception:
+    except Exception as parse_err:
+        # 诊断：如果是代码内部提取逻辑抛出了异常，打印出具体异常
+        print(f"  🔍 [诊断失败] {movie_url} 代码解析逻辑抛出异常: {str(parse_err)}")
         return None
 
 
