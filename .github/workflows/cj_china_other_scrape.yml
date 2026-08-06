@@ -43,7 +43,7 @@ jobs:
         pip install curl_cffi beautifulsoup4
 
     - name: Run Crawler
-      run: python scraper.py
+      run: python cj_china_other_movie.py
 
     - name: Commit and Push to data branch
       run: |
