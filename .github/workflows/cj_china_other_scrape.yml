@@ -13,9 +13,9 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0 # 获取完整历史分支，以便切换
+        fetch-depth: 0 # 获取完整历史分支
 
-    # 自动创建并切换到独立的 data 分支，确保不污染 main 分支
+    # 自动创建并切换到独立的 data 分支，并强行同步 main 分支的最新的爬虫脚本
     - name: Setup Branch (Switch to data branch)
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -26,6 +26,10 @@ jobs:
           echo "🟢 data 分支已存在，切换中..."
           git checkout data
           git pull origin data
+          
+          # 🌟【核心修复点】：强行从 main 分支把最新的爬虫代码拿过来，覆盖 data 分支上的老代码
+          echo "🔄 正在从 main 分支同步最新的爬虫代码..."
+          git checkout origin/main -- cj_china_other_movie.py
         else
           echo "🟡 data 分支不存在，正在从当前分支自动创建..."
           git checkout -b data
@@ -47,7 +51,7 @@ jobs:
 
     - name: Commit and Push to data branch
       run: |
-        git add urls.txt results/
+        git add urls.txt results/ cj_china_other_movie.py
         # 只有在有文件修改时才进行提交，防止空提交报错
         git diff --quiet && git diff --staged --quiet || git commit -m "Automated crawl batch - $(date +'%Y-%m-%d %H:%M:%S')"
         git push origin data
