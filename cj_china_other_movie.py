@@ -96,7 +96,9 @@ def parse_movie(movie_url):
         if download_hash:
             bt_hash = download_hash[3:].lower() if len(download_hash) == 43 else download_hash.lower()
             code = bt_hash
-            magnet_link = f"magnet:?xt=urn:btih:{bt_hash}&dn={re.sub(r'\s+', '%20', title)}"
+            # 先在外部替换标题中的空格，避免在大括号 {} 内使用反斜杠
+            safe_title = re.sub(r'\s+', '%20', title)
+            magnet_link = f"magnet:?xt=urn:btih:{bt_hash}&dn={safe_title}"
         else:
             url_match = re.search(r'/(\d+)\.html', movie_url)
             code = f"GCBT-{url_match.group(1)}" if url_match else f"GCBT-{str(int(time.time()))}"
