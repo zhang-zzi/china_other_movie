@@ -24,19 +24,22 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # ==================== 详情页高精度提取（带诊断日志版） ====================
 def parse_movie(movie_url):
+    import random  # 引入随机模块
     LOCAL_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Referer": "https://gcbt.net/"
     }
+    # 🌟 防御策略 A：在发起请求前，随机休眠 2.0 ~ 5.0 秒，模拟人类正常的浏览停留
+    time.sleep(random.uniform(1.0, 3.0))
 
     thread_scraper = curl_requests.Session()
     resp = None
     max_fetch_attempts = 3
     last_error = "None"
 
-    # 1. 网络请求
+     # 1. 网络请求
     for attempt in range(1, max_fetch_attempts + 1):
         try:
             resp = thread_scraper.get(
@@ -47,12 +50,18 @@ def parse_movie(movie_url):
             )
             if resp.status_code == 200:
                 break
+            elif resp.status_code == 403:
+                last_error = "HTTP 状态码: 403 (Cloudflare 防火墙拦截)"
+                # 🌟 防御策略 B：检测到 403 时，线程立刻退让，随机睡眠 5 ~ 8 秒，然后重试
+                sleep_time = random.uniform(2.0, 5.0)
+                print(f"  ⚠️ {movie_url} 遭遇 403 拦截，线程退让休眠 {sleep_time:.1f} 秒... (尝试 {attempt}/{max_fetch_attempts})")
+                time.sleep(sleep_time)
             else:
                 last_error = f"HTTP 状态码: {resp.status_code}"
-                time.sleep(0.5)
+                time.sleep(1.0)
         except Exception as req_err:
             last_error = f"网络请求异常: {str(req_err)}"
-            time.sleep(0.5)
+            time.sleep(1.0)
 
     # 诊断：如果是网络层导致失败，直接输出原因
     if not resp or resp.status_code != 200:
